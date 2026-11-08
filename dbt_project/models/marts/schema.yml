@@ -1,0 +1,29 @@
+version: 2
+models:
+  - name: fct_transactions
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+      - name: type
+        tests:
+          - accepted_values: {values: ['PAYMENT','TRANSFER','CASH_OUT','DEBIT','CASH_IN']}
+      - name: amount
+        tests: [not_null, non_negative]
+      - name: risk_level
+        tests:
+          - accepted_values: {values: ['LOW','MEDIUM','HIGH','CRITICAL'], config: {where: "risk_level is not null"}}
+      - name: risk_score
+        tests:
+          - non_negative
+  - name: dim_customers
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+  - name: dim_merchants
+    columns:
+      - name: merchant_id
+        tests: [unique, not_null]
+  - name: fct_fraud_daily
+    columns:
+      - name: event_date
+        tests: [unique, not_null]

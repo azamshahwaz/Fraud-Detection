@@ -1,0 +1,8 @@
+version: 2
+sources:
+  - name: raw
+    schema: public
+    tables:
+      - name: transactions
+      - name: predictions
+      - name: fraud_alerts

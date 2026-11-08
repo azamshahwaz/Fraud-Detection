@@ -1,0 +1,151 @@
+# Real-Time Fraud Detection Platform. Credentials come from .env (copy .env.example -> .env first).
+# NOTE: this file was syntax-validated but NOT run in the build environment (no Docker daemon). See TEST_REPORT.md.
+x-app: &app
+  build: { context: ., dockerfile: docker/Dockerfile }
+  image: fraud-app:latest
+  env_file: .env
+  environment: &appenv
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    MLFLOW_TRACKING_URI: sqlite:////app/state/mlflow.db
+    PAYSIM_CSV: /app/data/raw/paysim.csv
+    SPARK_CHECKPOINT_DIR: /app/state/checkpoints
+    MODEL_DIR: /app/models
+  volumes:
+    - data:/app/data
+    - models:/app/models
+    - state:/app/state
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    ports: ["9092:9092"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      retries: 20
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on: { kafka: { condition: service_healthy } }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic ${KAFKA_TOPIC:-transactions} --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic ${KAFKA_DLQ_TOPIC:-transactions.dlq} --partitions 1 --replication-factor 1
+    restart: "no"
+
+  migrate:
+    <<: *app
+    depends_on: { postgres: { condition: service_healthy } }
+    command: python scripts/migrate.py
+    restart: "no"
+
+  # One-shot bootstrap: create sample data (if no PaySim file is mounted), run ETL, train, score.
+  bootstrap:
+    <<: *app
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    command: >
+      sh -c "[ -f $${PAYSIM_CSV} ] || python -m src.data.generate_paysim --rows 100000 --out $${PAYSIM_CSV};
+             python -m src.etl.batch_etl && python -m src.ml.train && python -m src.scoring.batch_score"
+    restart: "no"
+    profiles: ["bootstrap"]
+
+  mlflow:
+    <<: *app
+    command: mlflow ui --backend-store-uri sqlite:////app/state/mlflow.db --host 0.0.0.0 --port 5000
+    ports: ["5000:5000"]
+
+  api:
+    <<: *app
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      retries: 10
+
+  frontend:
+    build: { context: ., dockerfile: docker/Dockerfile.frontend }
+    depends_on: [api]
+    ports: ["3000:80"]
+
+  streamlit:
+    <<: *app
+    command: streamlit run streamlit_app/app.py --server.port 8501 --server.address 0.0.0.0
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    ports: ["8501:8501"]
+
+  stream-consumer:
+    <<: *app
+    command: python -m src.streaming.consumer
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    profiles: ["streaming"]
+
+  spark-stream:
+    <<: *app
+    command: python -m src.streaming.spark_stream --source kafka
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    profiles: ["spark"]   # use either stream-consumer OR spark-stream (same consumer group semantics differ)
+
+  producer:
+    <<: *app
+    command: python -m src.streaming.producer --rate 50 --limit 5000 --dup-ratio 0.02
+    depends_on: { kafka-init: { condition: service_completed_successfully } }
+    restart: "no"
+    profiles: ["streaming", "spark"]
+
+  airflow:
+    build: { context: ., dockerfile: docker/Dockerfile.airflow }
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      MLFLOW_TRACKING_URI: sqlite:////app/state/mlflow.db
+      PAYSIM_CSV: /app/data/raw/paysim.csv
+      MODEL_DIR: /app/models
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/orchestration/dags
+    command: standalone
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    volumes:
+      - ./:/opt/airflow/project
+      - data:/app/data
+      - models:/app/models
+      - state:/app/state
+    ports: ["8080:8080"]
+    profiles: ["airflow"]
+
+volumes: { pgdata: {}, data: {}, models: {}, state: {} }

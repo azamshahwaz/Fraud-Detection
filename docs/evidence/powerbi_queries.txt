@@ -1,0 +1,6 @@
+PASS FactTransactions: 100,601 rows, 13 columns
+PASS DailyKPIs: 12 rows, 6 columns
+PASS HourlyKPIs: 241 rows, 4 columns
+PASS TypeKPIs: 5 rows, 6 columns
+PASS Customers: 12,500 rows, 8 columns
+PASS Merchants: 250 rows, 5 columns

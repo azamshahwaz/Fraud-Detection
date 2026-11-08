@@ -1,0 +1,10 @@
+FROM apache/airflow:2.10.3-python3.12
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends openjdk-17-jre-headless && rm -rf /var/lib/apt/lists/*
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+USER airflow
+# Project deps live in separate venvs (same pattern that was tested locally) so they never clash with Airflow's pins.
+COPY --chown=airflow requirements.txt requirements-dbt.txt /tmp/
+RUN python -m venv /home/airflow/fraud-venv && /home/airflow/fraud-venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
+ && python -m venv /home/airflow/dbt-venv && /home/airflow/dbt-venv/bin/pip install --no-cache-dir -r /tmp/requirements-dbt.txt
+ENV PYTHON_BIN=/home/airflow/fraud-venv/bin/python DBT_BIN=/home/airflow/dbt-venv/bin/dbt PROJECT_DIR=/opt/airflow/project

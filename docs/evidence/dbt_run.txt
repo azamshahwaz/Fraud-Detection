@@ -1,0 +1,24 @@
+04:54:49  Running with dbt=1.8.8
+04:54:49  Registered adapter: postgres=1.8.2
+04:54:49  Found 6 models, 19 data tests, 3 sources, 425 macros
+04:54:49  
+04:54:49  Concurrency: 2 threads (target='dev')
+04:54:49  
+04:54:49  1 of 6 START sql view model staging.stg_predictions ............................ [RUN]
+04:54:49  2 of 6 START sql view model staging.stg_transactions ........................... [RUN]
+04:54:50  1 of 6 OK created sql view model staging.stg_predictions ....................... [CREATE VIEW in 0.29s]
+04:54:50  2 of 6 OK created sql view model staging.stg_transactions ...................... [CREATE VIEW in 0.28s]
+04:54:50  3 of 6 START sql table model analytics.fct_transactions ........................ [RUN]
+04:54:51  3 of 6 OK created sql table model analytics.fct_transactions ................... [SELECT 100601 in 1.47s]
+04:54:51  4 of 6 START sql table model analytics.dim_customers ........................... [RUN]
+04:54:51  5 of 6 START sql table model analytics.dim_merchants ........................... [RUN]
+04:54:51  5 of 6 OK created sql table model analytics.dim_merchants ...................... [SELECT 250 in 0.17s]
+04:54:51  6 of 6 START sql table model analytics.fct_fraud_daily ......................... [RUN]
+04:54:51  4 of 6 OK created sql table model analytics.dim_customers ...................... [SELECT 12500 in 0.21s]
+04:54:51  6 of 6 OK created sql table model analytics.fct_fraud_daily .................... [SELECT 12 in 0.07s]
+04:54:51  
+04:54:51  Finished running 2 view models, 4 table models in 0 hours 0 minutes and 2.16 seconds (2.16s).
+04:54:51  
+04:54:51  Completed successfully
+04:54:51  
+04:54:51  Done. PASS=6 WARN=0 ERROR=0 SKIP=0 TOTAL=6

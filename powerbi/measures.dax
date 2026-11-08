@@ -1,0 +1,11 @@
+// Create these measures on the FactTransactions table (Modeling > New measure)
+Total Transactions = COUNTROWS(FactTransactions)
+Total Volume = SUM(FactTransactions[amount])
+Fraud Transactions = CALCULATE(COUNTROWS(FactTransactions), FactTransactions[is_fraud] = 1)
+Fraud Loss = CALCULATE(SUM(FactTransactions[amount]), FactTransactions[is_fraud] = 1)
+Fraud Rate % = DIVIDE([Fraud Transactions], [Total Transactions]) * 100
+Flagged by Model = CALCULATE(COUNTROWS(FactTransactions), FactTransactions[is_fraud_pred] = TRUE())
+Model Precision = DIVIDE(CALCULATE(COUNTROWS(FactTransactions), FactTransactions[is_fraud_pred] = TRUE(), FactTransactions[is_fraud] = 1), [Flagged by Model])
+Model Recall = DIVIDE(CALCULATE(COUNTROWS(FactTransactions), FactTransactions[is_fraud_pred] = TRUE(), FactTransactions[is_fraud] = 1), [Fraud Transactions])
+Avg Ticket = DIVIDE([Total Volume], [Total Transactions])
+Fraud Loss MoM % = VAR cur = [Fraud Loss] VAR prev = CALCULATE([Fraud Loss], DATEADD(DailyKPIs[day], -1, MONTH)) RETURN DIVIDE(cur - prev, prev)

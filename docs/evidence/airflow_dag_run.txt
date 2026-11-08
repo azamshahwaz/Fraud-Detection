@@ -1,0 +1,7 @@
+2026-11-07T04:55:17.034+0000 Marking task as SUCCESS check_input
+2026-11-07T04:55:50.025+0000 Marking task as SUCCESS spark_etl
+2026-11-07T04:55:51.357+0000 Marking task as SUCCESS batch_score
+2026-11-07T04:55:53.662+0000 Marking task as SUCCESS dbt_run
+2026-11-07T04:55:55.751+0000 Marking task as SUCCESS dbt_test
+2026-11-07T04:55:57.019+0000 Marking task as SUCCESS drift_check
+2026-11-07T04:55:57.027+0000 DagRun success

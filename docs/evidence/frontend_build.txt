@@ -1,0 +1,18 @@
+
+> fraud-console@1.0.0 build
+> vite build
+
+vite v5.4.11 building for production...
+transforming...
+✓ 638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.62 kB │ gzip:   0.37 kB
+dist/assets/index-D7r1ufYA.css    5.64 kB │ gzip:   1.89 kB
+dist/assets/index-DuE8cahY.js   605.19 kB │ gzip: 171.93 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.03s

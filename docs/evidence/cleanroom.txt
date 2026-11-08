@@ -1,0 +1,42 @@
+=== unzip
+README.md TEST_REPORT.md api data db dbt_project docker docker-compose.yml docs frontend models orchestration powerbi pytest.ini requirements-dbt.txt requirements.txt scripts src streamlit_app tests --- exit code: 0
+=== python -m venv .venv && pip install -r requirements.txt
+--- exit code: 0
+=== cp .env.example .env (+ db settings)
+--- exit code: 0
+=== python scripts/migrate.py
+2026-11-07 10:46:30,903 INFO migrate | applied 003_analytics_views.sql
+2026-11-07 10:46:30,904 INFO migrate | applied 004_view_ingested_at.sql
+2026-11-07 10:46:30,905 INFO migrate | migrations done (4 new)
+--- exit code: 0
+=== python -m src.data.generate_paysim --rows 30000
+wrote 30,000 rows (300 fraud) -> data/raw/paysim.csv
+--- exit code: 0
+=== python -m src.etl.batch_etl
+[Stage 0:>                                                          (0 + 1) / 1][Stage 0:===========================================================(1 + 0) / 1]                                                                                [Stage 3:>                                                          (0 + 1) / 1][Stage 5:>                                                          (0 + 1) / 4][Stage 5:==============>                                            (1 + 1) / 4][Stage 5:=============================>                             (2 + 1) / 4][Stage 5:============================================>              (3 + 1) / 4]                                                                                [Stage 15:>                                                         (0 + 1) / 1]                                                                                2026-11-07 10:46:49,998 INFO batch_etl | spark done: in=30000 valid=30000 rejected=0 (dupes dropped=0)
+2026-11-07 10:46:53,624 INFO batch_etl | loaded to postgres: 30000 new rows (0 already present)
+{'rows_in': 30000, 'rows_out': 30000, 'rejected': 0, 'inserted': 30000}
+--- exit code: 0
+=== python -m src.ml.train
+2026-11-07 10:46:56,600 INFO train | baseline logreg test: {'precision': 0.6388888888888888, 'recall': 0.7666666666666667, 'f1': 0.696969696969697, 'pr_auc': 0.7803673010648199, 'roc_auc': 0.9960548048048048, 'threshold': 0.9726099988040194}
+2026-11-07 10:46:59,969 INFO train | xgboost test: {'precision': 0.875, 'recall': 0.4666666666666667, 'f1': 0.6086956521739131, 'pr_auc': 0.8093083366871032, 'roc_auc': 0.9964039039039039, 'threshold': 0.877397894859314} | anomaly roc_auc=0.943
+  "threshold": 0.877397894859314,
+--- exit code: 0
+=== python -m src.scoring.batch_score
+{'scored': 30000, 'alerts_created': 241}
+--- exit code: 0
+=== uvicorn api.main:app --port 8001 + curl
+{"status":"ok","database":true,"model":"fraud-xgb-20261107104656"}
+{"total_transactions":30000,"total_volume":728347445.85,"fraud_transactions":300,"fraud_loss":42009139.0,"flagged_by_model":195,"fraud_rate_pct":1.0,"alerts_by_status":{"OPEN":241},"open_alerts":241,"
+=== python scripts/check_powerbi_queries.py
+PASS FactTransactions: 30,000 rows, 13 columns
+PASS DailyKPIs: 11 rows, 6 columns
+PASS HourlyKPIs: 240 rows, 4 columns
+PASS TypeKPIs: 5 rows, 6 columns
+PASS Customers: 3,747 rows, 8 columns
+PASS Merchants: 75 rows, 5 columns
+--- exit code: 0
+=== pytest -q (fraud_test database)
+56 passed, 1 skipped, 2 warnings in 68.92s (0:01:08)
+--- exit code: 0
+CLEAN_DONE

@@ -1,0 +1,12 @@
+version: 2
+models:
+  - name: stg_transactions
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+  - name: stg_predictions
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships: {to: ref('stg_transactions'), field: event_id}

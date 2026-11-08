@@ -1,0 +1,50 @@
+04:54:52  Running with dbt=1.8.8
+04:54:53  Registered adapter: postgres=1.8.2
+04:54:53  Found 6 models, 19 data tests, 3 sources, 425 macros
+04:54:53  
+04:54:53  Concurrency: 2 threads (target='dev')
+04:54:53  
+04:54:53  1 of 19 START test accepted_values_fct_transactions_risk_level__LOW__MEDIUM__HIGH__CRITICAL  [RUN]
+04:54:53  2 of 19 START test accepted_values_fct_transactions_type__PAYMENT__TRANSFER__CASH_OUT__DEBIT__CASH_IN  [RUN]
+04:54:53  2 of 19 PASS accepted_values_fct_transactions_type__PAYMENT__TRANSFER__CASH_OUT__DEBIT__CASH_IN  [PASS in 0.09s]
+04:54:53  3 of 19 START test assert_labelled_fraud_only_transfer_cashout ................. [RUN]
+04:54:53  1 of 19 PASS accepted_values_fct_transactions_risk_level__LOW__MEDIUM__HIGH__CRITICAL  [PASS in 0.10s]
+04:54:53  4 of 19 START test assert_predictions_cover_transactions ....................... [RUN]
+04:54:53  3 of 19 PASS assert_labelled_fraud_only_transfer_cashout ....................... [PASS in 0.07s]
+04:54:53  5 of 19 START test non_negative_fct_transactions_amount ........................ [RUN]
+04:54:53  4 of 19 PASS assert_predictions_cover_transactions ............................. [PASS in 0.12s]
+04:54:53  6 of 19 START test non_negative_fct_transactions_risk_score .................... [RUN]
+04:54:53  5 of 19 PASS non_negative_fct_transactions_amount .............................. [PASS in 0.08s]
+04:54:53  7 of 19 START test not_null_dim_customers_customer_id .......................... [RUN]
+04:54:53  6 of 19 PASS non_negative_fct_transactions_risk_score .......................... [PASS in 0.06s]
+04:54:53  8 of 19 START test not_null_dim_merchants_merchant_id .......................... [RUN]
+04:54:53  7 of 19 PASS not_null_dim_customers_customer_id ................................ [PASS in 0.04s]
+04:54:53  9 of 19 START test not_null_fct_fraud_daily_event_date ......................... [RUN]
+04:54:53  9 of 19 PASS not_null_fct_fraud_daily_event_date ............................... [PASS in 0.03s]
+04:54:53  10 of 19 START test not_null_fct_transactions_amount ........................... [RUN]
+04:54:53  8 of 19 PASS not_null_dim_merchants_merchant_id ................................ [PASS in 0.04s]
+04:54:53  11 of 19 START test not_null_fct_transactions_event_id ......................... [RUN]
+04:54:53  11 of 19 PASS not_null_fct_transactions_event_id ............................... [PASS in 0.04s]
+04:54:53  12 of 19 START test not_null_stg_predictions_event_id .......................... [RUN]
+04:54:53  10 of 19 PASS not_null_fct_transactions_amount ................................. [PASS in 0.06s]
+04:54:53  13 of 19 START test not_null_stg_transactions_event_id ......................... [RUN]
+04:54:53  12 of 19 PASS not_null_stg_predictions_event_id ................................ [PASS in 0.04s]
+04:54:53  14 of 19 START test relationships_stg_predictions_event_id__event_id__ref_stg_transactions_  [RUN]
+04:54:53  13 of 19 PASS not_null_stg_transactions_event_id ............................... [PASS in 0.04s]
+04:54:53  15 of 19 START test unique_dim_customers_customer_id ........................... [RUN]
+04:54:53  15 of 19 PASS unique_dim_customers_customer_id ................................. [PASS in 0.04s]
+04:54:53  16 of 19 START test unique_dim_merchants_merchant_id ........................... [RUN]
+04:54:54  16 of 19 PASS unique_dim_merchants_merchant_id ................................. [PASS in 0.04s]
+04:54:54  17 of 19 START test unique_fct_fraud_daily_event_date .......................... [RUN]
+04:54:54  14 of 19 PASS relationships_stg_predictions_event_id__event_id__ref_stg_transactions_  [PASS in 0.13s]
+04:54:54  18 of 19 START test unique_fct_transactions_event_id ........................... [RUN]
+04:54:54  17 of 19 PASS unique_fct_fraud_daily_event_date ................................ [PASS in 0.04s]
+04:54:54  19 of 19 START test unique_stg_transactions_event_id ........................... [RUN]
+04:54:54  18 of 19 PASS unique_fct_transactions_event_id ................................. [PASS in 0.10s]
+04:54:54  19 of 19 PASS unique_stg_transactions_event_id ................................. [PASS in 0.11s]
+04:54:54  
+04:54:54  Finished running 19 data tests in 0 hours 0 minutes and 0.80 seconds (0.80s).
+04:54:54  
+04:54:54  Completed successfully
+04:54:54  
+04:54:54  Done. PASS=19 WARN=0 ERROR=0 SKIP=0 TOTAL=19

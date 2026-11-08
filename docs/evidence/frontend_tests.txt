@@ -1,0 +1,8 @@
+ ✓ src/test/app.test.jsx (8 tests) 2875ms
+   ✓ Fraud console against the live API > Overview KPIs equal the database numbers 432ms
+   ✓ Fraud console against the live API > Transactions: lists rows, filters by type, opens detail 694ms
+   ✓ Fraud console against the live API > Transactions: empty result shows guidance 702ms
+   ✓ Fraud console against the live API > Alerts: lists open alerts and updates status through the API 398ms
+   ✓ Fraud console against the live API > Analytics and Pipelines pages render live data 356ms
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
