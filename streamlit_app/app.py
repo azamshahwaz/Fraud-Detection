@@ -12,7 +12,7 @@ import streamlit as st
 from sqlalchemy import text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.common.db import get_engine  # noqa: E402
+from backend.src.common.db import get_engine  # noqa: E402
 
 st.set_page_config(page_title="Fraud Monitor", layout="wide")
 st.title("Real-time fraud monitor")

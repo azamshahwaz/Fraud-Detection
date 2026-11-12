@@ -72,8 +72,8 @@ services:
     <<: *app
     depends_on: { migrate: { condition: service_completed_successfully } }
     command: >
-      sh -c "[ -f $${PAYSIM_CSV} ] || python -m src.data.generate_paysim --rows 100000 --out $${PAYSIM_CSV};
-             python -m src.etl.batch_etl && python -m src.ml.train && python -m src.scoring.batch_score"
+      sh -c "[ -f $${PAYSIM_CSV} ] || python -m backend.src.data.generate_paysim --rows 100000 --out $${PAYSIM_CSV};
+             python -m backend.src.etl.batch_etl && python -m backend.src.ml.train && python -m backend.src.scoring.batch_score"
     restart: "no"
     profiles: ["bootstrap"]
 
@@ -84,7 +84,7 @@ services:
 
   api:
     <<: *app
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    command: python -m uvicorn backend.api.main:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000}
     depends_on: { migrate: { condition: service_completed_successfully } }
     ports: ["8000:8000"]
     healthcheck:
@@ -105,7 +105,7 @@ services:
 
   stream-consumer:
     <<: *app
-    command: python -m src.streaming.consumer
+    command: python -m backend.src.streaming.consumer
     depends_on:
       kafka-init: { condition: service_completed_successfully }
       migrate: { condition: service_completed_successfully }
@@ -114,7 +114,7 @@ services:
 
   spark-stream:
     <<: *app
-    command: python -m src.streaming.spark_stream --source kafka
+    command: python -m backend.src.streaming.spark_stream --source kafka
     depends_on:
       kafka-init: { condition: service_completed_successfully }
       migrate: { condition: service_completed_successfully }
@@ -123,7 +123,7 @@ services:
 
   producer:
     <<: *app
-    command: python -m src.streaming.producer --rate 50 --limit 5000 --dup-ratio 0.02
+    command: python -m backend.src.streaming.producer --rate 50 --limit 5000 --dup-ratio 0.02
     depends_on: { kafka-init: { condition: service_completed_successfully } }
     restart: "no"
     profiles: ["streaming", "spark"]

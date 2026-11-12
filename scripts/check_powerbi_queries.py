@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.common.db import get_engine  # noqa: E402
+from backend.src.common.db import get_engine  # noqa: E402
 
 blocks = re.split(r"^-- name: (\w+)\s*$", (Path(__file__).resolve().parents[1] / "powerbi" / "queries.sql").read_text(), flags=re.M)
 failed = 0

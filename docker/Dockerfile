@@ -6,8 +6,8 @@ ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 PYTHONUNBUFFERED=1 PYTHONPATH=/
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir mlflow==2.17.2
-COPY src ./src
-COPY api ./api
+COPY backend/src ./backend/src
+COPY backend/api ./backend/api
 COPY streamlit_app ./streamlit_app
 COPY db ./db
 COPY scripts ./scripts

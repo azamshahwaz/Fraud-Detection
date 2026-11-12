@@ -5,8 +5,8 @@ from pathlib import Path
 from sqlalchemy import text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.common.db import get_engine  # noqa: E402
-from src.common.logging_setup import get_logger  # noqa: E402
+from backend.src.common.db import get_engine  # noqa: E402
+from backend.src.common.logging_setup import get_logger  # noqa: E402
 
 log = get_logger("migrate")
 MIGRATIONS = Path(__file__).resolve().parents[1] / "db" / "migrations"

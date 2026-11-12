@@ -54,14 +54,14 @@ Training → MLflow (tracking + registry) → model bundle used by API / batch /
 
 ## Folder structure
 ```
-api/                    FastAPI app (main.py, routers/, schemas.py, deps.py)
-src/common/             config (env vars), db helpers (retry, idempotent inserts, pipeline_run), schema/event ids
-src/data/               PaySim-schema generator
-src/etl/                PySpark batch ETL + input check
-src/ml/                 features (shared), training (XGBoost + LogReg baseline + IsolationForest, MLflow)
-src/scoring/            Scorer (single scoring implementation) and batch scoring job
-src/streaming/          producer, consumer, shared processor, Spark Structured Streaming
-src/monitoring/         PSI drift
+backend/api/            FastAPI app (main.py, routers/, schemas.py, deps.py)
+backend/src/common/     config (env vars), db helpers (retry, idempotent inserts, pipeline_run), schema/event ids
+backend/src/data/       PaySim-schema generator
+backend/src/etl/        PySpark batch ETL + input check
+backend/src/ml/         features (shared), training (XGBoost + LogReg baseline + IsolationForest, MLflow)
+backend/src/scoring/    Scorer (single scoring implementation) and batch scoring job
+backend/src/streaming/  producer, consumer, shared processor, Spark Structured Streaming
+backend/src/monitoring/ PSI drift
 db/migrations/          001..004 SQL migrations;  scripts/migrate.py applies them
 dbt_project/            staging + marts models, generic + singular tests, profiles via env vars
 orchestration/dags/     Airflow DAGs (batch pipeline, weekly retrain)
@@ -69,7 +69,7 @@ streamlit_app/          real-time monitor
 frontend/               React console (+ vitest integration tests)
 powerbi/                .pbids, import queries, DAX measures, theme
 docker/ + docker-compose.yml
-tests/                  pytest: unit, integration, API, Streamlit, Spark, e2e
+backend/tests/          pytest: unit, integration, API, Streamlit, Spark, e2e
 docs/                   architecture + test evidence logs
 ```
 
@@ -95,12 +95,12 @@ cp .env.example .env            # then edit POSTGRES_PASSWORD (and API_KEY if yo
 # create role + database (needs a local PostgreSQL superuser), then apply migrations:
 bash scripts/init_db.sh         # or follow "Database setup" below
 
-python -m src.data.generate_paysim --rows 100000      # or place the real PaySim CSV at data/raw/paysim.csv
-python -m src.etl.batch_etl                           # PySpark ETL  -> PostgreSQL
-python -m src.ml.train                                # train + MLflow + model bundle
-python -m src.scoring.batch_score                     # predictions + alerts
+python -m backend.src.data.generate_paysim --rows 100000      # or place the real PaySim CSV at data/raw/paysim.csv
+python -m backend.src.etl.batch_etl                           # PySpark ETL  -> PostgreSQL
+python -m backend.src.ml.train                                # train + MLflow + model bundle
+python -m backend.src.scoring.batch_score                     # predictions + alerts
 
-uvicorn api.main:app --port 8000 &                    # API  http://localhost:8000/docs
+python -m uvicorn backend.api.main:app --port 8000 &  # API  http://localhost:8000/docs
 (cd frontend && npm install && npm run dev)           # React http://localhost:5173
 streamlit run streamlit_app/app.py                    # Streamlit http://localhost:8501
 ```
@@ -120,12 +120,12 @@ psql -U postgres -c "CREATE ROLE fraud_user LOGIN PASSWORD 'your-password'"
 psql -U postgres -c "CREATE DATABASE fraud_db OWNER fraud_user"
 python scripts\migrate.py
 
-python -m src.data.generate_paysim --rows 100000
-python -m src.etl.batch_etl
-python -m src.ml.train
-python -m src.scoring.batch_score
+python -m backend.src.data.generate_paysim --rows 100000
+python -m backend.src.etl.batch_etl
+python -m backend.src.ml.train
+python -m backend.src.scoring.batch_score
 
-Start-Process python -ArgumentList "-m","uvicorn","api.main:app","--port","8000"
+Start-Process python -ArgumentList "-m","uvicorn","backend.api.main:app","--port","8000"
 cd frontend; npm install; npm run dev
 # new terminal:  streamlit run streamlit_app\app.py
 ```
@@ -141,9 +141,9 @@ kaggle datasets download -d ealaxi/paysim1 -p data/raw --unzip
 mv data/raw/PS_20174392719_1491204439457_log.csv data/raw/paysim.csv     # PowerShell: Move-Item
 ```
 The full file has ~6.36 M rows (~470 MB). On a laptop start with a slice:
-`python -m src.ml.train --max-rows 1000000` and `head -n 1000001 data/raw/paysim.csv > data/raw/paysim_1m.csv`.
+`python -m backend.src.ml.train --max-rows 1000000` and `head -n 1000001 data/raw/paysim.csv > data/raw/paysim_1m.csv`.
 
-**Built-in generator (used for all verification here):** `python -m src.data.generate_paysim --rows 100000 --fraud-rate 0.01`
+**Built-in generator (used for all verification here):** `python -m backend.src.data.generate_paysim --rows 100000 --fraud-rate 0.01`
 produces the same schema and the same qualitative fraud pattern (fraud only in `TRANSFER`/`CASH_OUT`, large amounts,
 often draining the account) with deliberately overlapping hard negatives. **It is not real data**: reported metrics describe
 this synthetic set only. Real PaySim has ≈0.13 % fraud, so expect a lower PR-AUC and a different threshold.
@@ -195,17 +195,17 @@ To use the real PaySim file in Docker: `docker compose run --rm -v "$PWD/PS_...c
 ### Kafka (real-time path) — ⚠️ broker not available in the build environment
 ```bash
 docker compose up -d kafka kafka-init                       # single-node KRaft broker + topics
-python -m src.streaming.producer --rate 50 --limit 5000 --dup-ratio 0.02    # replay events (2% duplicates on purpose)
-python -m src.streaming.consumer                            # validate -> dedupe -> score -> PostgreSQL -> alerts; Ctrl-C to stop
+python -m backend.src.streaming.producer --rate 50 --limit 5000 --dup-ratio 0.02    # replay events (2% duplicates on purpose)
+python -m backend.src.streaming.consumer                            # validate -> dedupe -> score -> PostgreSQL -> alerts; Ctrl-C to stop
 ```
 Bad JSON / invalid records go to `KAFKA_DLQ_TOPIC`. Offsets are committed only after the batch is stored.
 
 ### Spark
 ```bash
-python -m src.etl.batch_etl --input data/raw/paysim.csv     # batch ETL; rejects written to data/processed/rejects
-python -m src.streaming.spark_stream --source kafka         # ⚠️ Kafka source (downloads spark-sql-kafka package from Maven on first run)
-python -m src.streaming.spark_stream --source files --input-dir data/stream_in          # ✅ file source, same logic, no broker
-python -m src.streaming.spark_stream --source files --once  # process what is there, then exit (checkpoint recovery demo)
+python -m backend.src.etl.batch_etl --input data/raw/paysim.csv     # batch ETL; rejects written to data/processed/rejects
+python -m backend.src.streaming.spark_stream --source kafka         # ⚠️ Kafka source (downloads spark-sql-kafka package from Maven on first run)
+python -m backend.src.streaming.spark_stream --source files --input-dir data/stream_in          # ✅ file source, same logic, no broker
+python -m backend.src.streaming.spark_stream --source files --once  # process what is there, then exit (checkpoint recovery demo)
 ```
 Files for the file source are JSON-lines with the producer's fields (`event_id, step, type, amount, name_orig, …`).
 
@@ -236,11 +236,11 @@ cd dbt_project && set -a && source ../.env && set +a
 
 ### ML training and inference
 ```bash
-python -m src.ml.train                         # --max-rows N to subsample, --no-db to skip writing model_metrics
+python -m backend.src.ml.train                         # --max-rows N to subsample, --no-db to skip writing model_metrics
 mlflow ui --backend-store-uri sqlite:///./mlflow.db        # needs full `pip install mlflow==2.17.2`; compare runs & registry
-python -m src.scoring.batch_score              # score all unscored rows
+python -m backend.src.scoring.batch_score              # score all unscored rows
 python - <<'PY'                                # single inference from Python
-from src.scoring.scorer import get_scorer
+from backend.src.scoring.scorer import get_scorer
 import pandas as pd
 row = dict(step=300, type="TRANSFER", amount=250000, name_orig="C1", old_balance_org=250000, new_balance_org=0,
            name_dest="C2", old_balance_dest=0, new_balance_dest=0)
@@ -256,7 +256,7 @@ Typical result: XGBoost precision ≈ 0.74, recall ≈ 0.57, F1 ≈ 0.64, PR-AUC
 
 ### Backend and frontend
 ```bash
-uvicorn api.main:app --reload --port 8000        # Swagger UI at /docs, ReDoc at /redoc
+python -m uvicorn backend.api.main:app --reload --port 8000  # Swagger UI at /docs, ReDoc at /redoc
 cd frontend && npm install && npm run dev        # dev server proxies /api/* to :8000 (set VITE_PROXY_TARGET to change)
 cd frontend && npm run build                     # static bundle in frontend/dist (served by nginx in Docker)
 ```
@@ -337,7 +337,7 @@ Results and the list of unverified components: [`TEST_REPORT.md`](TEST_REPORT.md
 | Symptom | Fix |
 |---|---|
 | `Missing required environment variable: POSTGRES_PASSWORD` | create `.env` from `.env.example` and set it |
-| `Model bundle not found` / API `/health` says `degraded`, `/predict` returns 503 | run `python -m src.ml.train`; the API loads the model lazily, no restart needed |
+| `Model bundle not found` / API `/health` says `degraded`, `/predict` returns 503 | run `python -m backend.src.ml.train`; the API loads the model lazily, no restart needed |
 | `JAVA_HOME is not set` / Spark won't start | install JDK 17 or 21 and export `JAVA_HOME` |
 | `ModuleNotFoundError: kafka.vendor.six.moves` | old kafka-python on Python 3.12; use the pinned `kafka-python==2.3.3` |
 | `No module named 'distutils'` in Spark foreachBatch | already avoided (`collect()` instead of `toPandas()`); don't reintroduce `toPandas` on Python 3.12 without `setuptools` |
