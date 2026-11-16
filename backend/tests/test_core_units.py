@@ -81,6 +81,23 @@ def test_psi_same_vs_shifted():
     assert psi([0.5, 0.5], [50, 50]) == pytest.approx(0, abs=1e-9)
 
 
+def test_psi_is_not_reported_for_insufficient_samples():
+    X = build_features(canonicalize_paysim(generate(1000, 0.02, seed=13)))
+    profile = reference_profile(X)
+    small = compute_drift(profile, X.iloc[:199])
+    assert all(item["status"] == "INSUFFICIENT_DATA" and item["psi"] is None for item in small)
+    assert all(item["n_reference"] == 1000 and item["n_current"] == 199 for item in small)
+    sufficient = compute_drift(profile, X.iloc[:200])
+    assert all(item["status"] in {"OK", "WARN", "DRIFT"} for item in sufficient)
+
+
+def test_psi_is_not_reported_for_insufficient_reference_profile():
+    X = build_features(canonicalize_paysim(generate(100, 0.02, seed=14)))
+    profile = reference_profile(X)
+    result = compute_drift(profile, X)
+    assert all(item["status"] == "INSUFFICIENT_DATA" and item["psi"] is None for item in result)
+
+
 def test_with_retry_retries_then_succeeds(monkeypatch):
     monkeypatch.setattr("time.sleep", lambda s: None)
     calls = {"n": 0}

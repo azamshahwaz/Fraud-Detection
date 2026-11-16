@@ -11,7 +11,7 @@ export default function Overview() {
   return (
     <>
       <h1>Overview</h1>
-      <State loading={ov.loading} error={ov.error}>
+      <State loading={ov.loading} error={ov.error} retry={ov.reload}>
         {ov.data && (
           <div className="kpis">
             <Kpi label="Transactions" value={fmtNum(ov.data.total_transactions)} />
@@ -24,7 +24,8 @@ export default function Overview() {
       </State>
       <div className="grid2">
         <Panel title="Daily transactions and confirmed fraud">
-          <State loading={ts.loading} error={ts.error}>
+          <State loading={ts.loading} error={ts.error} retry={ts.reload}>
+            {ts.data?.points?.length === 0 && <div className="notice">No transaction trend data is available yet.</div>}
             <div className="chart">
               <ResponsiveContainer width="100%" height={260}>
                 <ComposedChart data={ts.data?.points || []}>
@@ -42,7 +43,7 @@ export default function Overview() {
           </State>
         </Panel>
         <Panel title="Risk level distribution">
-          <State loading={ov.loading} error={ov.error}>
+          <State loading={ov.loading} error={ov.error} retry={ov.reload}>
             <div className="chart">
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={LEVELS.map((l) => ({ level: l, n: ov.data?.risk_distribution?.find((r) => r.risk_level === l)?.n || 0 }))}>
@@ -58,7 +59,8 @@ export default function Overview() {
         </Panel>
       </div>
       <Panel title="By transaction type">
-        <State loading={ty.loading} error={ty.error}>
+        <State loading={ty.loading} error={ty.error} retry={ty.reload}>
+          {ty.data?.items?.length === 0 && <div className="notice">No transaction type data is available yet.</div>}
           <table>
             <thead><tr><th>Type</th><th className="num">Transactions</th><th className="num">Volume</th><th className="num">Fraud</th><th className="num">Fraud loss</th><th className="num">Fraud rate</th></tr></thead>
             <tbody>

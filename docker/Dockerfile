@@ -10,5 +10,9 @@ COPY backend/src ./backend/src
 COPY backend/api ./backend/api
 COPY streamlit_app ./streamlit_app
 COPY db ./db
+COPY dbt_project ./dbt_project
 COPY scripts ./scripts
-RUN mkdir -p /app/data/raw /app/models /app/state
+RUN useradd --create-home --uid 10001 app \
+    && mkdir -p /app/data/raw /app/data/processed /app/data/checkpoints /app/data/stream_in /app/models /app/state \
+    && chown -R app:app /app
+USER app

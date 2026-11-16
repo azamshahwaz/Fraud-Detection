@@ -14,7 +14,8 @@ export default function Analytics() {
       <h1>Historical fraud analytics</h1>
       <Panel title="Fraud loss over time" actions={
         <div className="seg">{["day", "hour"].map((g) => <button key={g} className={g === grain ? "on" : ""} onClick={() => setGrain(g)}>{g}</button>)}</div>}>
-        <State loading={ts.loading} error={ts.error}>
+        <State loading={ts.loading} error={ts.error} retry={ts.reload}>
+          {ts.data?.points?.length === 0 && <div className="notice">No fraud trend data is available yet.</div>}
           <div className="chart">
             <ResponsiveContainer width="100%" height={280}>
               <AreaChart data={ts.data?.points || []}>
@@ -30,7 +31,8 @@ export default function Analytics() {
       </Panel>
       <div className="grid2">
         <Panel title="Fraud rate by transaction type">
-          <State loading={ty.loading} error={ty.error}>
+          <State loading={ty.loading} error={ty.error} retry={ty.reload}>
+            {ty.data?.items?.length === 0 && <div className="notice">No transaction type data is available yet.</div>}
             <div className="chart">
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={ty.data?.items || []}>
@@ -45,7 +47,8 @@ export default function Analytics() {
           </State>
         </Panel>
         <Panel title="Accounts with the most confirmed fraud">
-          <State loading={top.loading} error={top.error}>
+          <State loading={top.loading} error={top.error} retry={top.reload}>
+            {top.data?.items?.length === 0 && <div className="notice">No confirmed-fraud account data is available yet.</div>}
             <table>
               <thead><tr><th>Account</th><th className="num">Transactions</th><th className="num">Fraud</th><th className="num">Total amount</th></tr></thead>
               <tbody>{(top.data?.items || []).map((r) => (

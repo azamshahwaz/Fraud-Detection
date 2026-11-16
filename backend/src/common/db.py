@@ -98,6 +98,103 @@ def insert_transactions(df: pd.DataFrame, chunk: int = 5000) -> int:
     return total
 
 
+def insert_transactions_in(conn, df: pd.DataFrame, chunk: int = 5000) -> int:
+    """Insert one bounded frame using a caller-owned transaction."""
+    if df.empty:
+        return 0
+    if chunk < 1:
+        raise ValueError("chunk must be a positive integer")
+    cols = [c for c in TXN_COLS if c in df.columns]
+    if "event_id" not in cols:
+        raise ValueError("transactions must include event_id")
+    sql = text(f"INSERT INTO transactions ({','.join(cols)}) VALUES ({','.join(':' + c for c in cols)}) "
+               "ON CONFLICT (event_id) DO NOTHING")
+    total = 0
+    for i in range(0, len(df), chunk):
+        total += conn.execute(sql, _records(df.iloc[i:i + chunk], cols)).rowcount
+    return total
+
+
+def persist_ingestion_batch(batch: dict, transaction_chunks) -> int:
+    """Persist a batch atomically, recording retryable state and returning inserted row count.
+
+    ``transaction_chunks`` is an iterable factory so each invocation is consumed inside the
+    database transaction without first materializing the complete batch in Python memory.
+    """
+    required = {
+        "batch_id", "source_path", "source_size_bytes", "source_sha256", "output_path",
+        "rows_in", "rows_valid", "rows_rejected", "rows_duplicates",
+    }
+    missing = required - batch.keys()
+    if missing:
+        raise ValueError(f"batch metadata is missing fields: {', '.join(sorted(missing))}")
+    if batch["rows_in"] != batch["rows_valid"] + batch["rows_rejected"] + batch["rows_duplicates"]:
+        raise ValueError("batch row counts do not reconcile")
+
+    eng = get_engine()
+    metadata = {
+        "batch_id": batch["batch_id"], "source_path": batch["source_path"],
+        "source_size_bytes": batch["source_size_bytes"], "source_sha256": batch["source_sha256"],
+        "output_path": batch["output_path"], "rows_in": batch["rows_in"],
+        "rows_valid": batch["rows_valid"], "rows_rejected": batch["rows_rejected"],
+        "rows_duplicates": batch["rows_duplicates"],
+    }
+
+    # Commit a visible RUNNING marker before opening the all-or-nothing data transaction.
+    with eng.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO ingestion_batches(batch_id, source_path, source_size_bytes, source_sha256, output_path, "
+            "rows_in, rows_valid, rows_rejected, rows_duplicates, status) "
+            "VALUES (:batch_id, :source_path, :source_size_bytes, :source_sha256, :output_path, "
+            ":rows_in, :rows_valid, :rows_rejected, :rows_duplicates, 'RUNNING') "
+            "ON CONFLICT (batch_id) DO NOTHING"
+        ), metadata)
+        previous = conn.execute(text(
+            "SELECT source_path, source_size_bytes, source_sha256, status FROM ingestion_batches "
+            "WHERE batch_id=:batch_id FOR UPDATE"
+        ), {"batch_id": batch["batch_id"]}).mappings().one()
+        if (previous["source_path"] != batch["source_path"]
+                or previous["source_size_bytes"] != batch["source_size_bytes"]
+                or previous["source_sha256"] != batch["source_sha256"]):
+            raise ValueError("batch ID is already associated with different source identity")
+        if previous["status"] == "SUCCEEDED":
+            return 0
+        conn.execute(text(
+            "UPDATE ingestion_batches SET output_path=:output_path, rows_in=:rows_in, rows_valid=:rows_valid, "
+            "rows_rejected=:rows_rejected, rows_duplicates=:rows_duplicates, status='RUNNING', error=NULL, "
+            "started_at=now(), finished_at=NULL WHERE batch_id=:batch_id"
+        ), metadata)
+
+    try:
+        with eng.begin() as conn:
+            state = conn.execute(text(
+                "SELECT status FROM ingestion_batches WHERE batch_id=:batch_id FOR UPDATE"
+            ), {"batch_id": batch["batch_id"]}).scalar_one()
+            if state == "SUCCEEDED":
+                return 0
+            inserted = processed = 0
+            for frame in transaction_chunks():
+                processed += len(frame)
+                inserted += insert_transactions_in(conn, frame)
+            if processed != batch["rows_valid"]:
+                raise ValueError("streamed transaction count did not match batch rows_valid")
+            conn.execute(text(
+                "UPDATE ingestion_batches SET status='SUCCEEDED', rows_inserted=:rows_inserted, "
+                "error=NULL, finished_at=now() WHERE batch_id=:batch_id"
+            ), {"rows_inserted": inserted, "batch_id": batch["batch_id"]})
+        return inserted
+    except Exception as exc:
+        try:
+            with eng.begin() as conn:
+                conn.execute(text(
+                    "UPDATE ingestion_batches SET status='FAILED', error=:error, finished_at=now() "
+                    "WHERE batch_id=:batch_id AND status<>'SUCCEEDED'"
+                ), {"error": f"batch persistence failed ({type(exc).__name__})", "batch_id": batch["batch_id"]})
+        except Exception:
+            log.exception("Could not record failed ingestion batch %s", batch["batch_id"])
+        raise
+
+
 def insert_predictions(df: pd.DataFrame, chunk: int = 5000) -> int:
     if df.empty:
         return 0
@@ -118,6 +215,34 @@ def insert_predictions(df: pd.DataFrame, chunk: int = 5000) -> int:
 
         total += with_retry(_run)
     return total
+
+
+def persist_predictions_and_alerts(df: pd.DataFrame, event_ids: list[str], threshold: float) -> tuple[int, int]:
+    """Persist new scores and reconcile qualifying alerts in one database transaction.
+
+    Alert selection uses the stored predictions, so concurrent scoring cannot create an alert
+    from a score that lost an ``ON CONFLICT`` race. Existing scores are never overwritten.
+    """
+    if not event_ids:
+        return 0, 0
+    prediction_count = 0
+    with get_engine().begin() as conn:
+        if not df.empty:
+            cols = ["event_id", "fraud_probability", "anomaly_score", "risk_score", "risk_level",
+                    "is_fraud_pred", "model_version"]
+            insert_sql = text(
+                f"INSERT INTO predictions ({','.join(cols)}) VALUES ({','.join(':' + col for col in cols)}) "
+                "ON CONFLICT (event_id) DO NOTHING"
+            )
+            prediction_count = conn.execute(insert_sql, _records(df, cols)).rowcount
+        alert_count = conn.execute(text(
+            "INSERT INTO fraud_alerts(event_id,risk_score,risk_level) "
+            "SELECT p.event_id,p.risk_score,p.risk_level FROM predictions p "
+            "WHERE p.event_id=ANY(CAST(:ids AS text[])) "
+            "AND (p.is_fraud_pred OR p.risk_score >= :threshold) "
+            "ON CONFLICT (event_id) DO NOTHING"
+        ), {"ids": event_ids, "threshold": threshold}).rowcount
+    return prediction_count, alert_count
 
 
 def _insert_prediction_in(conn, df: pd.DataFrame) -> int:

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
 from backend.api.deps import require_api_key, scorer_dep
-from backend.src.common.db import get_engine
+from backend.src.common.db import get_engine, pipeline_run
 from backend.src.ml.features import build_features
 from backend.src.monitoring.drift import compute_drift
 from backend.src.scoring.scorer import Scorer
@@ -57,8 +57,15 @@ def model_metrics(scorer: Scorer = Depends(scorer_dep)):
     hist = _rows("SELECT model_version, mlflow_run_id, split, metrics, confusion, created_at "
                  "FROM model_metrics ORDER BY created_at DESC LIMIT 10")
     t = scorer.metrics["test"]
+    confusion = t["confusion"]
+    sample_count = int(sum(confusion.values()))
+    positive_count = int(confusion["fn"] + confusion["tp"])
+    negative_count = int(confusion["tn"] + confusion["fp"])
+    evaluation_status = "INSUFFICIENT_DATA" if min(positive_count, negative_count) < 2 else "AVAILABLE"
+    test_metrics = {k: v for k, v in t.items() if k != "confusion"}
+    test_metrics.update(sample_count=sample_count, positive_count=positive_count)
     return {"active_model": scorer.version, "threshold": scorer.threshold, "mlflow_run_id": scorer.mlflow_run_id,
-            "test": {k: v for k, v in t.items() if k != "confusion"}, "confusion": t["confusion"],
+            "test": test_metrics, "evaluation_status": evaluation_status, "confusion": confusion,
             "baseline_logreg": {k: v for k, v in scorer.metrics["baseline_logreg"].items() if k != "confusion"},
             "anomaly_roc_auc": scorer.metrics["anomaly_roc_auc"], "history": hist}
 
@@ -74,19 +81,33 @@ def pipeline_runs(limit: int = Query(25, ge=1, le=200)):
 
 @router.post("/monitoring/drift/run", tags=["monitoring"], summary="PSI of the latest N transactions vs training data")
 def run_drift(window: int = Query(5000, ge=200, le=100000), scorer: Scorer = Depends(scorer_dep)):
-    df = pd.read_sql(text("SELECT step,type,amount,name_dest,old_balance_org,new_balance_org,old_balance_dest,"
-                          "new_balance_dest FROM transactions ORDER BY ingested_at DESC, event_time DESC LIMIT :w"),
-                     get_engine(), params={"w": window})
-    for c in ["amount", "old_balance_org", "new_balance_org", "old_balance_dest", "new_balance_dest"]:
-        df[c] = df[c].astype(float)
-    rep = compute_drift(scorer.reference_profile, build_features(df))
-    with get_engine().begin() as c:
-        c.execute(text("INSERT INTO drift_reports(feature,psi,status,n_reference,n_current) "
-                       "VALUES (:feature,:psi,:status,:n_reference,:n_current)"), rep)
+    with pipeline_run("drift_monitor_api") as stats:
+        df = pd.read_sql(text("SELECT step,type,amount,name_dest,old_balance_org,new_balance_org,old_balance_dest,"
+                              "new_balance_dest FROM transactions ORDER BY ingested_at DESC, event_time DESC LIMIT :w"),
+                         get_engine(), params={"w": window})
+        stats["rows_in"] = len(df)
+        if df.empty:
+            from backend.src.monitoring.drift import DRIFT_FEATURES
+            current_features = pd.DataFrame(columns=DRIFT_FEATURES)
+        else:
+            for c in ["amount", "old_balance_org", "new_balance_org", "old_balance_dest", "new_balance_dest"]:
+                df[c] = df[c].astype(float)
+            current_features = build_features(df)
+        rep = compute_drift(scorer.reference_profile, current_features)
+        with get_engine().begin() as c:
+            c.execute(text("INSERT INTO drift_reports(feature,psi,status,n_reference,n_current) "
+                           "VALUES (:feature,:psi,:status,:n_reference,:n_current)"), rep)
+        stats["rows_out"] = len(rep)
     return {"window": window, "features": rep}
 
 
 @router.get("/monitoring/drift", tags=["monitoring"])
 def latest_drift():
-    return {"features": _rows("""SELECT DISTINCT ON (feature) feature, psi, status, n_current, created_at
-                                  FROM drift_reports ORDER BY feature, created_at DESC""")}
+    latest = _rows("""SELECT DISTINCT ON (feature) feature, psi, status, n_reference, n_current, created_at
+                       FROM drift_reports ORDER BY feature, created_at DESC""")
+    insufficient = [row for row in latest if row["status"] == "INSUFFICIENT_DATA"]
+    reliable = [row for row in latest if row["status"] != "INSUFFICIENT_DATA"]
+    status = "INSUFFICIENT_DATA" if insufficient else ("AVAILABLE" if reliable else "NO_DATA")
+    # Keep the legacy numeric features array safe for current clients; null-PSI records are
+    # exposed separately so callers can show their counts/status without treating PSI as valid.
+    return {"status": status, "features": reliable, "insufficient_features": insufficient}

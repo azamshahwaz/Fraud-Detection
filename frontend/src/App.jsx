@@ -18,7 +18,7 @@ export default function App() {
         <div className="brand">Fraud Console</div>
         {NAV.map(([to, label]) => <NavLink key={to} to={to} end={to === "/"}>{label}</NavLink>)}
         <div className={`health ${ok ? "ok" : "bad"}`} role="status">
-          {health.error ? "API unreachable" : health.data ? (ok ? "API and model healthy" : "API degraded") : "Checking API…"}
+          {health.error ? <>API unreachable <button onClick={health.reload}>Retry</button></> : health.data ? (ok ? "API and model healthy" : "API degraded") : "Checking API…"}
         </div>
       </nav>
       <main>

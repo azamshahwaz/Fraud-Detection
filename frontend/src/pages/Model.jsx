@@ -17,15 +17,15 @@ export default function Model() {
   return (
     <>
       <h1>Model performance</h1>
-      <State loading={m.loading} error={m.error}>
+      <State loading={m.loading} error={m.error} retry={m.reload}>
         {m.data && (
           <>
-            <p className="muted">Active model <span className="mono">{m.data.active_model}</span> · decision threshold {m.data.threshold.toFixed(3)} · held-out test split (time-based)</p>
+            <p className="muted">Active model <span className="mono">{m.data.active_model}</span> · decision threshold {Number(m.data.threshold).toFixed(3)} · held-out test split (time-based)</p>
             <div className="kpis">
               <Kpi label="Precision" value={fmtPct(m.data.test.precision)} />
               <Kpi label="Recall" value={fmtPct(m.data.test.recall)} />
               <Kpi label="F1" value={fmtPct(m.data.test.f1)} />
-              <Kpi label="PR-AUC" value={m.data.test.pr_auc.toFixed(3)} hint={`baseline logistic regression: ${m.data.baseline_logreg.pr_auc.toFixed(3)}`} />
+              <Kpi label="PR-AUC" value={Number(m.data.test.pr_auc).toFixed(3)} hint={`baseline logistic regression: ${Number(m.data.baseline_logreg.pr_auc).toFixed(3)}`} />
             </div>
             <div className="grid2">
               <Panel title="Confusion matrix (test)">
@@ -39,16 +39,17 @@ export default function Model() {
                 <table>
                   <thead><tr><th>Trained</th><th>Model</th><th className="num">F1</th><th className="num">PR-AUC</th></tr></thead>
                   <tbody>{m.data.history.map((h) => (
-                    <tr key={h.model_version + h.created_at}><td>{fmtTime(h.created_at)}</td><td className="mono">{h.model_version}</td><td className="num">{fmtPct(h.metrics.f1)}</td><td className="num">{h.metrics.pr_auc.toFixed(3)}</td></tr>))}</tbody>
+                    <tr key={h.model_version + h.created_at}><td>{fmtTime(h.created_at)}</td><td className="mono">{h.model_version}</td><td className="num">{fmtPct(h.metrics.f1)}</td><td className="num">{Number(h.metrics.pr_auc).toFixed(3)}</td></tr>))}</tbody>
                 </table>
+                {m.data.history.length === 0 && <div className="notice">No model evaluation history has been recorded.</div>}
               </Panel>
             </div>
           </>
         )}
       </State>
       <Panel title="Data drift (PSI vs training data)" actions={<button className="primary" onClick={run} disabled={running}>{running ? "Running…" : "Run drift check"}</button>}>
-        {err && <div className="notice error" role="alert">Drift check failed. {err.message}</div>}
-        <State loading={drift.loading} error={drift.error}>
+        {err && <div className="notice error" role="alert">Drift check failed. {err.message} <button onClick={run}>Retry drift check</button></div>}
+        <State loading={drift.loading} error={drift.error} retry={drift.reload}>
           {drift.data && drift.data.features.length === 0 && <div className="notice">No drift report yet. Run a drift check to compare recent transactions with the training data.</div>}
           {drift.data && drift.data.features.length > 0 && (
             <table>

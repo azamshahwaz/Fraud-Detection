@@ -7,6 +7,7 @@ import pandas as pd
 DRIFT_FEATURES = ["amount", "old_balance_org", "old_balance_dest", "amount_to_balance", "error_balance_org",
                   "error_balance_dest", "step_hour"]
 EPS = 1e-4
+MIN_DRIFT_SAMPLE = 200
 
 
 def reference_profile(X: pd.DataFrame, bins: int = 10) -> dict:
@@ -37,8 +38,14 @@ def status_for(p: float) -> str:
 def compute_drift(profile: dict, X_current: pd.DataFrame) -> list[dict]:
     out = []
     for f, ref in profile.items():
+        n_current = int(len(X_current))
+        n_reference = int(ref.get("n", 0))
+        if n_current < MIN_DRIFT_SAMPLE or n_reference < MIN_DRIFT_SAMPLE:
+            out.append({"feature": f, "psi": None, "status": "INSUFFICIENT_DATA",
+                        "n_reference": n_reference, "n_current": n_current})
+            continue
         counts, _ = np.histogram(X_current[f].astype(float).values, bins=np.array(ref["edges"]))
         p = psi(ref["props"], counts)
         out.append({"feature": f, "psi": round(p, 5), "status": status_for(p),
-                    "n_reference": ref["n"], "n_current": int(len(X_current))})
+                    "n_reference": n_reference, "n_current": n_current})
     return out

@@ -101,7 +101,7 @@ python -m backend.src.ml.train                                # train + MLflow +
 python -m backend.src.scoring.batch_score                     # predictions + alerts
 
 python -m uvicorn backend.api.main:app --port 8000 &  # API  http://localhost:8000/docs
-(cd frontend && npm install && npm run dev)           # React http://localhost:5173
+(cd frontend && npm install && npm run dev)           # React http://localhost:5176
 streamlit run streamlit_app/app.py                    # Streamlit http://localhost:8501
 ```
 
@@ -160,7 +160,7 @@ All settings are environment variables (see `.env.example`); nothing secret is h
 | `MLFLOW_TRACKING_URI`, `MLFLOW_EXPERIMENT`, `MODEL_DIR`, `MODEL_NAME` | ML | sqlite:///./mlflow.db, fraud-detection, ./models, fraud-xgb |
 | `PAYSIM_CSV`, `DATA_DIR` | data | ./data/raw/paysim.csv, ./data |
 | `API_KEY` | if set, every endpoint except `/health` requires header `X-API-Key` | empty (open) |
-| `CORS_ORIGINS` | allowed browser origins | http://localhost:5173,http://localhost:3000 |
+| `CORS_ORIGINS` | allowed browser origins | see `.env.example` |
 | `ALERT_RISK_THRESHOLD` | risk score that opens an alert (also opens on model-predicted fraud) | 80 |
 
 ## Database setup
@@ -177,18 +177,47 @@ Tables: `transactions`, `predictions`, `fraud_alerts`, `pipeline_runs`, `model_m
 Views for BI: `v_transactions_scored`, `v_daily_kpis`, `v_hourly_kpis`, `v_type_kpis`, `v_customer_patterns`, `v_merchant_analysis`.
 
 ## Docker
-> ⚠️ `docker-compose.yml` is syntax- and reference-validated but **was not run** (no Docker daemon in the build environment).
-```bash
-cp .env.example .env                                   # set POSTGRES_PASSWORD
-docker compose up -d --build postgres kafka kafka-init migrate
-docker compose --profile bootstrap run --rm bootstrap   # generate data (if none), ETL, train, score
-docker compose up -d api frontend streamlit mlflow      # React :3000, API :8000/docs, Streamlit :8501, MLflow :5000
-docker compose --profile streaming up -d stream-consumer producer    # real-time path via Kafka consumer
-#   or: docker compose --profile spark up -d spark-stream producer    # real-time path via Spark Structured Streaming
-docker compose --profile airflow up -d airflow          # Airflow UI :8080 (see logs for the generated admin password)
-docker compose down            # add -v to also delete volumes
+
+The Compose stack is intended as a single-host deployment. Published ports bind to loopback by default. PostgreSQL and Kafka data, ETL outputs, Spark checkpoints, model files, and application state use persistent volumes or host mounts. The raw dataset mount is read-only. Compose reads credentials from an untracked root `.env`; `.dockerignore` excludes local environment files, datasets, model artifacts, and the dbt user profile from the build context.
+
+Docker/Compose are not installed in the current environment, so image builds and the full Compose lifecycle have not been verified here.
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env and replace POSTGRES_PASSWORD with a strong random value before starting.
+docker compose config
+docker compose up -d --build
+docker compose ps
+Invoke-RestMethod http://localhost:8000/health
 ```
-To use the real PaySim file in Docker: `docker compose run --rm -v "$PWD/PS_...csv:/app/data/raw/paysim.csv" bootstrap`.
+
+The API container is considered healthy only when both PostgreSQL and the model are available. The local `models/fraud_bundle.joblib` is bind-mounted so Compose does not hide or replace an existing artifact. If it is absent, restore the approved artifact before starting the frontend. Raw CSV files under `data/raw/` are mounted read-only; the bootstrap job never generates or overwrites data and fails clearly if the source CSV or model bundle is missing.
+
+One-shot ETL and scoring, using the existing source data and model:
+
+```powershell
+docker compose --profile bootstrap run --rm bootstrap
+```
+
+Start and exercise the streaming consumer (the test producer sends a bounded sample):
+
+```powershell
+docker compose --profile streaming up -d stream-consumer
+docker compose --profile streaming run --rm producer
+docker compose logs --tail 100 stream-consumer
+```
+
+Run dbt models/tests and start Airflow when needed:
+
+```powershell
+docker compose --profile analytics run --rm dbt
+docker compose --profile airflow up -d airflow
+docker compose logs airflow
+```
+
+Optional services use profiles: `streaming`, `spark`, `analytics`, `airflow`, `mlflow`, and `streamlit`. Run either the Kafka consumer or Spark Kafka source for one consumer group at a time. `docker compose down` preserves named volumes; `docker compose down -v` deletes database and service state and is intentionally not part of the normal stop procedure.
+
+The default Compose deployment is loopback-only, single-node and uses plaintext internal broker/database connections. Do not expose these ports directly to the internet. A production-facing deployment still needs TLS, an external identity/authentication gateway, managed secrets, database backup/restore procedures, and tested multi-node PostgreSQL/Kafka/Airflow infrastructure. The browser app does not embed `API_KEY`; if API key auth is enabled, provide it at a trusted gateway or keep the API private.
 
 ## Run each component
 
@@ -324,13 +353,13 @@ With `API_KEY` set: `curl -H "X-API-Key: $API_KEY" http://localhost:8000/alerts`
 ```bash
 pytest -q                                   # Python: unit, integration, API, Streamlit AppTest, Spark, e2e (uses database fraud_test)
 pytest -q --cov=src --cov=api               # with coverage
-cd frontend && npm test                     # React integration tests against the running API (TEST_API_URL, default :8000)
+cd frontend && npm test                     # React UI tests using FastAPI-shaped response fixtures
 cd dbt_project && dbt test --profiles-dir . # data-quality tests
 airflow dags test fraud_batch_pipeline 2026-01-01      # (airflow venv) run the DAG
 python scripts/check_powerbi_queries.py     # Power BI import queries
 ```
 Python tests need a second database: `createdb -O fraud_user fraud_test` (or set `TEST_POSTGRES_DB`); they train a small model in a temp dir,
-run migrations and truncate tables between tests — they never touch `fraud_db`. Frontend tests expect the API on `:8000` backed by data (run Quick start first).
+run migrations and truncate tables between tests — they never touch `fraud_db`. Frontend tests use contract-shaped API fixtures and do not mutate a live service. Backend API integration tests use only `fraud_test`, apply migrations there, and truncate its tables between tests.
 Results and the list of unverified components: [`TEST_REPORT.md`](TEST_REPORT.md).
 
 ## Troubleshooting
@@ -350,9 +379,9 @@ Results and the list of unverified components: [`TEST_REPORT.md`](TEST_REPORT.md
 
 ## Known limitations
 * Verified on synthetic PaySim-schema data; real-PaySim metrics will differ (far lower fraud rate). Retrain and re-pick the threshold on real data.
-* Kafka broker, Docker Compose stack, the Spark **Kafka source**, Windows installation and Power BI Desktop were not executed here (see TEST_REPORT).
+* Kafka broker, Docker Compose stack, Docker image builds/health checks, the Spark **Kafka source**, Windows installation and Power BI Desktop were not executed here (see TEST_REPORT).
   Their logic is tested through shared code paths (the processor, the Spark file source, query checks) but the transport itself is unverified.
-* The React UI was verified with jsdom integration tests against the live API and a production build, not in a real browser; no visual/screenshot review was possible.
+* React UI route behavior was verified with jsdom contract fixtures and a production build, not against a running browser/backend in this environment; no visual/screenshot review was possible.
 * Alerts are not pushed (email/Slack/webhook); they are stored and shown. No authentication beyond an optional shared API key; no per-user roles.
 * PaySim labels are simulated; `isFlaggedFraud` is stored but not used as a feature.
 * Spark runs in `local[*]`; production would target a cluster and the JDBC sink instead of parquet → COPY-style load.

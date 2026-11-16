@@ -1,5 +1,5 @@
-export function State({ loading, error, children }) {
-  if (error) return <div className="notice error" role="alert">Could not load data. {error.message}</div>;
+export function State({ loading, error, retry, children }) {
+  if (error) return <div className="notice error" role="alert">Could not load data. {error.message}{retry && <> <button onClick={retry}>Retry</button></>}</div>;
   if (loading) return <div className="notice">Loading…</div>;
   return children;
 }

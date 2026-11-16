@@ -1,27 +1,218 @@
+
+# ==========================================
+# ENVIRONMENT VARIABLES & SECRETS
+# ==========================================
 .env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+secrets/
+credentials/
+config/secrets.*
+
+# ==========================================
+# PYTHON
+# ==========================================
 venv/
 .venv/
+env/
+ENV/
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+MANIFEST
+
+# Python testing, coverage & linting
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
 .coverage
+.coverage.*
 htmlcov/
+coverage.xml
+nosetests.xml
+test-results/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ==========================================
+# NODE.JS / REACT / VITE
+# ==========================================
 node_modules/
+frontend/node_modules/
+backend/node_modules/
+dist/
 frontend/dist/
+backend/dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==========================================
+# MACHINE LEARNING / MODEL ARTIFACTS
+# ==========================================
+models/*.joblib
+models/*.pkl
+models/*.pickle
+models/*.onnx
+models/*.pt
+models/*.pth
+models/*.h5
+models/*.keras
+models/*.safetensors
+models/*.json
 mlruns/
 mlflow.db
-models/*.joblib
-models/*.json
-data/raw/*.csv
-data/processed/
-data/checkpoints/
-data/stream_in/
+mlflow.db-shm
+mlflow.db-wal/
+checkpoints/
+model_checkpoints/
+wandb/
+.tensorboard/
+
+# Keep model directory structure
+!models/.gitkeep
+
+# ==========================================
+# DATASETS & DATA PIPELINES
+# ==========================================
+data/raw/*
+data/processed/*
+data/checkpoints/*
+data/stream_in/*
+data/stream_out/*
+data/temp/*
+data/interim/*
+
+# Keep directory structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/checkpoints/.gitkeep
+!data/stream_in/.gitkeep
+!data/stream_out/.gitkeep
+
+# ==========================================
+# SPARK / HADOOP
+# ==========================================
+spark-warehouse/
+metastore_db/
+derby.log
+*.crc
+*.parquet
+*.orc
+
+# ==========================================
+# DBT
+# ==========================================
 dbt_project/target/
 dbt_project/logs/
 dbt_project/dbt_packages/
+
+# ==========================================
+# AIRFLOW
+# ==========================================
 airflow/logs/
 airflow/airflow.db
-spark-warehouse/
+airflow/airflow.cfg
+airflow/__pycache__/
+
+# ==========================================
+# KAFKA
+# ==========================================
+kafka-logs/
+kafka-data/
+*.log.*
+
+# ==========================================
+# DATABASE / LOCAL STORAGE
+# ==========================================
+*.sqlite
+*.sqlite3
+*.db
+!mlflow.db.example
+
+# ==========================================
+# LOGS & TEMPORARY FILES
+# ==========================================
 *.log
+logs/
+tmp/
+temp/
+.cache/
+*.tmp
+*.bak
+*.swp
+*.swo
 .DS_Store
-frontend/node_modules/
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# DOCKER / LOCAL OVERRIDES
+# ==========================================
+docker-compose.override.yml
+.env.docker
+.env.local
+
+# ==========================================
+# IDE / EDITORS
+# ==========================================
+.vscode/
+.idea/
+*.iml
+*.sublime-workspace
+*.sublime-project
+
+# ==========================================
+# OS
+# ==========================================
+.Trashes
+.AppleDouble
+.LSOverride
+
+# ==========================================
+# GIT
+# ==========================================
+*.orig
+*.rej
+
+# Temporary test data
+data/test_parquet/
+
+# Backup files
+*.backup
+*.bak
+*.orig
+frontend/package-lock.backup.json
+
+# Experimental training scripts
+backend/src/ml/train_backup.py
+backend/src/ml/train_optimized.py

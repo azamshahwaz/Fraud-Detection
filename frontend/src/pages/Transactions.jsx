@@ -13,7 +13,7 @@ export default function Transactions() {
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState(null);
   const path = useMemo(() => `/transactions${qs({ ...applied, limit: LIMIT, offset })}`, [applied, offset]);
-  const { data, error, loading } = useApi(path);
+  const { data, error, loading, reload } = useApi(path);
   const detail = useApi(selected ? `/transactions/${selected}` : null);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const submit = (e) => { e.preventDefault(); setOffset(0); setApplied(f); };
@@ -30,7 +30,7 @@ export default function Transactions() {
         <button type="submit" className="primary">Apply filters</button>
       </form>
       <Panel title="Results">
-        <State loading={loading && !data} error={error}>
+        <State loading={loading && !data} error={error} retry={reload}>
           {data && data.items.length === 0 && <div className="notice">No transactions match these filters. Clear a filter to widen the search.</div>}
           {data && data.items.length > 0 && (
             <>
@@ -58,7 +58,7 @@ export default function Transactions() {
         <aside className="drawer" aria-label="Transaction detail">
           <button className="close" onClick={() => setSelected(null)}>Close</button>
           <h2>Transaction detail</h2>
-          <State loading={detail.loading} error={detail.error}>
+          <State loading={detail.loading} error={detail.error} retry={detail.reload}>
             {detail.data && (
               <dl>
                 {["event_id", "event_time", "type", "amount", "name_orig", "name_dest", "old_balance_org", "new_balance_org", "old_balance_dest", "new_balance_dest", "fraud_probability", "anomaly_score", "risk_score", "risk_level", "model_version"].map((k) => (

@@ -2,19 +2,21 @@ import { fmtNum, fmtTime, useApi } from "../hooks";
 import { Panel, State } from "../components/ui";
 
 export default function Pipelines() {
-  const { data, error, loading } = useApi("/pipeline/runs?limit=30", { refreshMs: 10000 });
+  const { data, error, loading, reload } = useApi("/pipeline/runs?limit=30", { refreshMs: 10000 });
   return (
     <>
       <h1>Pipeline monitoring</h1>
-      <State loading={loading && !data} error={error}>
+      <State loading={loading && !data} error={error} retry={reload}>
         {data && (
           <>
+            <div className="notice integration-note">This API reports application pipeline runs. It does not expose Airflow scheduler health or a live Kafka broker status; Kafka consumer rows appear only after a consumer run is recorded.</div>
             <Panel title="Pipelines">
-              <table>
+              {data.summary.length === 0 && <div className="notice">No pipeline runs have been recorded.</div>}
+              {data.summary.length > 0 && <table>
                 <thead><tr><th>Pipeline</th><th className="num">Runs</th><th className="num">Failures</th><th>Last run</th></tr></thead>
                 <tbody>{data.summary.map((s) => (
                   <tr key={s.pipeline}><td>{s.pipeline}</td><td className="num">{s.runs}</td><td className="num">{s.failures > 0 ? <span className="pill CRITICAL">{s.failures}</span> : 0}</td><td>{fmtTime(s.last_run)}</td></tr>))}</tbody>
-              </table>
+              </table>}
             </Panel>
             <Panel title="Recent runs">
               {data.runs.length === 0 && <div className="notice">No pipeline runs recorded yet.</div>}

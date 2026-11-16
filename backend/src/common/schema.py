@@ -16,7 +16,69 @@ PAYSIM_RENAME = {
 }
 REQUIRED_RAW = ["step", "type", "amount", "nameOrig", "oldbalanceOrg", "newbalanceOrig", "nameDest",
                 "oldbalanceDest", "newbalanceDest"]
+OPTIONAL_RAW = ["isFraud", "isFlaggedFraud"]
 NUM_COLS = ["amount", "old_balance_org", "new_balance_org", "old_balance_dest", "new_balance_dest"]
+REQUIRED_CANONICAL = ["step", "type", "amount", "name_orig", "old_balance_org", "new_balance_org", "name_dest",
+                     "old_balance_dest", "new_balance_dest"]
+
+REASON_BAD_STEP = "bad_step"
+REASON_BAD_TYPE = "bad_type"
+REASON_BAD_NUMBER = "bad_number"
+REASON_NEGATIVE_AMOUNT = "negative_amount"
+REASON_NEGATIVE_BALANCE = "negative_balance"
+REASON_BAD_LABEL = "bad_label"
+
+
+def validate_transaction_record(record: dict) -> str | None:
+    """Validate a canonical transaction record and return its stable reject code, if invalid."""
+    if not isinstance(record, dict):
+        return "not_an_object"
+
+    for field in REQUIRED_CANONICAL:
+        if field not in record or record[field] is None:
+            return f"missing:{field}"
+        if isinstance(record[field], str) and not record[field].strip():
+            return f"empty:{field}"
+
+    if not isinstance(record["type"], str) or record["type"] not in TXN_TYPES:
+        return REASON_BAD_TYPE
+
+    if isinstance(record["step"], bool):
+        return f"{REASON_BAD_NUMBER}:step"
+    try:
+        step = float(record["step"])
+    except (TypeError, ValueError, OverflowError):
+        return f"{REASON_BAD_NUMBER}:step"
+    if not pd.notna(step) or step in (float("inf"), float("-inf")):
+        return f"{REASON_BAD_NUMBER}:step"
+    if step < 0 or not step.is_integer():
+        return REASON_BAD_STEP
+
+    for field in NUM_COLS:
+        if isinstance(record[field], bool):
+            return f"{REASON_BAD_NUMBER}:{field}"
+        try:
+            value = float(record[field])
+        except (TypeError, ValueError, OverflowError):
+            return f"{REASON_BAD_NUMBER}:{field}"
+        if not pd.notna(value) or value in (float("inf"), float("-inf")):
+            return f"{REASON_BAD_NUMBER}:{field}"
+        if value < 0:
+            return REASON_NEGATIVE_AMOUNT if field == "amount" else f"{REASON_NEGATIVE_BALANCE}:{field}"
+
+    for field in ("is_fraud", "is_flagged_fraud"):
+        value = record.get(field)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        if isinstance(value, bool):
+            return REASON_BAD_LABEL
+        try:
+            label = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return REASON_BAD_LABEL
+        if not pd.notna(label) or label in (float("inf"), float("-inf")) or label not in (0.0, 1.0):
+            return REASON_BAD_LABEL
+    return None
 
 
 def make_event_id(step, typ, amount, name_orig, old_org, new_org, name_dest, old_dest, new_dest) -> str:

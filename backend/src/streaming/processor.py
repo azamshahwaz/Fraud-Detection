@@ -5,40 +5,26 @@ Invalid records are returned so the caller can route them to a dead-letter queue
 """
 from __future__ import annotations
 
-import math
-
 import pandas as pd
+from sqlalchemy.exc import DataError, IntegrityError
 
 from backend.src.common.config import get_settings
-from backend.src.common.db import create_alerts, insert_predictions, insert_transactions
+from backend.src.common.db import persist_scored_transaction
 from backend.src.common.logging_setup import get_logger
-from backend.src.common.schema import TXN_TYPES, add_event_id, add_event_time
+from backend.src.common.schema import NUM_COLS, add_event_id, add_event_time, validate_transaction_record
 
 log = get_logger("processor")
-REQ = ["step", "type", "amount", "name_orig", "old_balance_org", "new_balance_org", "name_dest",
-       "old_balance_dest", "new_balance_dest"]
-NUM = ["amount", "old_balance_org", "new_balance_org", "old_balance_dest", "new_balance_dest"]
+
+
+def _optional_label(value, default):
+    if pd.isna(value) or (isinstance(value, str) and not value.strip()):
+        return default
+    return int(float(value))
 
 
 def validate_record(r: dict) -> str | None:
     """Return an error string, or None if the record is valid."""
-    if not isinstance(r, dict):
-        return "not_an_object"
-    for k in REQ:
-        if r.get(k) is None:
-            return f"missing:{k}"
-    if r["type"] not in TXN_TYPES:
-        return "bad_type"
-    try:
-        if int(r["step"]) < 0:
-            return "bad_step"
-        for k in NUM:
-            v = float(r[k])
-            if math.isnan(v) or math.isinf(v) or v < 0:
-                return f"bad_number:{k}"
-    except (TypeError, ValueError):
-        return "bad_number"
-    return None
+    return validate_transaction_record(r)
 
 
 def process_records(records: list[dict], scorer, alert_threshold: float | None = None) -> dict:
@@ -52,20 +38,38 @@ def process_records(records: list[dict], scorer, alert_threshold: float | None =
     if not valid:
         return stats
     df = pd.DataFrame(valid)
-    for c in NUM:
+    for c in NUM_COLS:
         df[c] = df[c].astype(float)
     df["step"] = df["step"].astype(int)
     for c, d in (("is_fraud", None), ("is_flagged_fraud", 0)):
         if c not in df.columns:
             df[c] = d
-    df = add_event_time(add_event_id(df)) if "event_id" not in df.columns or df["event_id"].isna().any() else add_event_time(df)
+        df[c] = df[c].map(lambda value: _optional_label(value, d))
+    # Derive the key from canonical transaction fields on every path. This keeps producer,
+    # Spark and Kafka replay identity aligned even if a caller supplied a stale event_id.
+    df = add_event_time(add_event_id(df))
     before = len(df)
+    record_by_event_id = dict(zip(df["event_id"], valid))
     df = df.drop_duplicates("event_id")                  # duplicates inside the micro-batch
-    stats["inserted"] = insert_transactions(df)          # duplicates already in DB are ignored
-    stats["duplicates"] = (before - len(df)) + (len(df) - stats["inserted"])
     scored = scorer.score(df)
-    stats["scored"] = insert_predictions(scored)
-    stats["alerts"] = create_alerts(scored[scored["event_id"].isin(df["event_id"])], thr) if stats["inserted"] else 0
+    # Persist each event as one transaction. If a later event fails, earlier events are safe
+    # to replay because event_id conflicts are ignored and their predictions/alerts are unchanged.
+    for index in range(len(scored)):
+        try:
+            inserted, alert_created = persist_scored_transaction(scored.iloc[[index]], thr)
+        except (DataError, IntegrityError) as exc:
+            # A deterministic PostgreSQL constraint rejection is a poison event, not a
+            # transient batch failure. The consumer sends its hash/reason to the DLQ.
+            invalid.append({"record": record_by_event_id[scored.iloc[index]["event_id"]],
+                            "error": f"persistence_rejected:{type(exc).__name__}"})
+            continue
+        stats["inserted"] += int(inserted)
+        stats["scored"] += int(inserted)
+        stats["alerts"] += int(alert_created)
+    stats["invalid"] = invalid
+    stats["duplicates"] = (before - len(df)) + (len(df) - stats["inserted"] -
+                                                       sum(item["error"].startswith("persistence_rejected:")
+                                                           for item in invalid))
     log.info("batch: recv=%d valid=%d inserted=%d dup=%d invalid=%d alerts=%d", stats["received"], stats["valid"],
              stats["inserted"], stats["duplicates"], len(invalid), stats["alerts"])
     return stats

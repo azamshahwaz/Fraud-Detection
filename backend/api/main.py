@@ -44,7 +44,8 @@ async def access_log(request: Request, call_next):
 
 @app.exception_handler(SQLAlchemyError)
 async def db_error(_: Request, exc: SQLAlchemyError):
-    log.error("database error: %s", exc)
+    # Avoid logging SQL parameters or connection details that may contain sensitive data.
+    log.error("database request failed error_type=%s", type(exc).__name__)
     return JSONResponse(status_code=503, content={"detail": "Database unavailable or query failed"})
 
 

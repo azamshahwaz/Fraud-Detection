@@ -141,10 +141,14 @@ def test_analytics_endpoints(client):
 def test_model_pipeline_drift_endpoints(client):
     m = client.get("/model/metrics").json()
     assert {"precision", "recall", "f1", "pr_auc"} <= set(m["test"]) and set(m["confusion"]) == {"tn", "fp", "fn", "tp"}
+    assert m["test"]["sample_count"] == sum(m["confusion"].values())
+    assert m["test"]["positive_count"] == m["confusion"]["fn"] + m["confusion"]["tp"]
+    assert m["evaluation_status"] in ("AVAILABLE", "INSUFFICIENT_DATA")
     for i in range(250):
         client.post("/transactions", json={**SAFE, "step": i + 1, "name_orig": f"C{i}"})
     d = client.post("/monitoring/drift/run?window=200").json()
     assert d["features"] and all(f["status"] in ("OK", "WARN", "DRIFT") for f in d["features"])
+    assert all({"n_reference", "n_current"} <= set(f) for f in d["features"])
     assert client.get("/monitoring/drift").json()["features"]
     assert "summary" in client.get("/pipeline/runs").json()
     assert client.post("/monitoring/drift/run?window=5").status_code == 422

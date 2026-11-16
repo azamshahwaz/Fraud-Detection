@@ -4,9 +4,26 @@ models:
     columns:
       - name: event_id
         tests: [unique, not_null]
+      - name: event_time
+        tests: [not_null]
+      - name: type
+        tests:
+          - accepted_values: {values: ['PAYMENT','TRANSFER','CASH_OUT','DEBIT','CASH_IN']}
+      - name: amount
+        tests: [not_null, non_negative]
+      - name: is_fraud
+        tests:
+          - accepted_values: {values: [0, 1], config: {where: "is_fraud is not null"}}
   - name: stg_predictions
     columns:
       - name: event_id
         tests:
+          - unique
           - not_null
           - relationships: {to: ref('stg_transactions'), field: event_id}
+      - name: fraud_probability
+        tests: [not_null]
+      - name: risk_score
+        tests: [not_null, non_negative]
+      - name: model_version
+        tests: [not_null]

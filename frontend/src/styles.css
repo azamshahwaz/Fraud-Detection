@@ -14,7 +14,7 @@ main{padding:24px 28px;min-width:0}
 .kpi{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:12px 14px}
 .kpi-label{color:var(--steel);font-size:12px}.kpi-value{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}.kpi-hint{font-size:12px;color:var(--steel)}
 .kpi.danger .kpi-value{color:var(--red)}.kpi.warn .kpi-value{color:var(--amber)}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:16px}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:14px 16px;margin-bottom:16px;min-width:0}
 .panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px}
 .scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
@@ -42,6 +42,9 @@ button.danger{color:var(--red);border-color:#e3b5af}.actions{display:flex;gap:6p
 .drawer{position:fixed;right:0;top:0;bottom:0;width:380px;max-width:100%;background:#fff;border-left:1px solid var(--rule);padding:20px;overflow:auto;box-shadow:-8px 0 24px rgba(20,33,61,.08)}
 .drawer dl{margin:12px 0 0}.drawer dl div{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #edf0f4}
 .drawer dt{color:var(--steel);text-transform:none}.drawer dd{margin:0;text-align:right;word-break:break-all}.close{float:right}
+.link-button{padding:0;border:0;background:none;color:var(--teal);text-decoration:underline}
+.link-button:hover:not(:disabled){background:none;color:var(--ink)}
+.integration-note{margin:0 0 12px;background:#eef2f6;border-radius:4px}
 .cm{display:grid;grid-template-columns:110px 1fr 1fr;gap:6px}.cm-h{color:var(--steel);font-size:12px;display:flex;align-items:center}
 .cm-c{padding:16px 10px;border-radius:4px;font-size:22px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums}.cm-c small{display:block;font-size:11px;font-weight:400}
 .cm-c.ok{background:#e1f1e8;color:var(--green)}.cm-c.bad{background:#f8d9d5;color:#8f2a1f}

@@ -1,35 +1,67 @@
-# Real-Time Fraud Detection Platform. Credentials come from .env (copy .env.example -> .env first).
-# NOTE: this file was syntax-validated but NOT run in the build environment (no Docker daemon). See TEST_REPORT.md.
+name: fraud-platform
+
 x-app: &app
-  build: { context: ., dockerfile: docker/Dockerfile }
-  image: fraud-app:latest
-  env_file: .env
-  environment: &appenv
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: fraud-app:local
+  environment: &app-environment
     POSTGRES_HOST: postgres
     POSTGRES_PORT: "5432"
+    POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+    POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    API_KEY: ${API_KEY:-}
+    CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5176,http://127.0.0.1:5176,http://localhost:3000,http://127.0.0.1:3000}
+    ALERT_RISK_THRESHOLD: ${ALERT_RISK_THRESHOLD:-80}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
     KAFKA_BOOTSTRAP_SERVERS: kafka:19092
-    MLFLOW_TRACKING_URI: sqlite:////app/state/mlflow.db
+    KAFKA_TOPIC: ${KAFKA_TOPIC:-transactions}
+    KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-transactions.dlq}
+    KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-fraud-scorer}
+    DATA_DIR: /app/data
     PAYSIM_CSV: /app/data/raw/paysim.csv
-    SPARK_CHECKPOINT_DIR: /app/state/checkpoints
     MODEL_DIR: /app/models
-  volumes:
-    - data:/app/data
-    - models:/app/models
-    - state:/app/state
+    MODEL_NAME: ${MODEL_NAME:-fraud-xgb}
+    SPARK_CHECKPOINT_DIR: /app/data/checkpoints
+    SPARK_SHUFFLE_PARTITIONS: ${SPARK_SHUFFLE_PARTITIONS:-4}
+    MLFLOW_TRACKING_URI: sqlite:////app/state/mlflow.db
+    MLFLOW_EXPERIMENT: ${MLFLOW_EXPERIMENT:-fraud-detection}
+  volumes: &app-volumes
+    - type: bind
+      source: ./data/raw
+      target: /app/data/raw
+      read_only: true
+    - type: bind
+      source: ./data/stream_in
+      target: /app/data/stream_in
+    - type: bind
+      source: ./models
+      target: /app/models
+    - processed-data:/app/data/processed
+    - spark-checkpoints:/app/data/checkpoints
+    - app-state:/app/state
+  networks: [fraud]
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes: [pgdata:/var/lib/postgresql/data]
-    ports: ["5432:5432"]
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PUBLISHED_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
+      timeout: 3s
       retries: 20
+      start_period: 10s
+    restart: unless-stopped
+    networks: [fraud]
 
   kafka:
     image: apache/kafka:3.8.0
@@ -37,7 +69,7 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:${KAFKA_PUBLISHED_PORT:-9092}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
@@ -45,107 +77,257 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-    ports: ["9092:9092"]
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "127.0.0.1:${KAFKA_PUBLISHED_PORT:-9092}:9092"
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
+      timeout: 10s
       retries: 20
+      start_period: 20s
+    restart: unless-stopped
+    networks: [fraud]
 
   kafka-init:
     image: apache/kafka:3.8.0
-    depends_on: { kafka: { condition: service_healthy } }
-    entrypoint: ["/bin/sh", "-c"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
     command:
-      - |
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic ${KAFKA_TOPIC:-transactions} --partitions 3 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic ${KAFKA_DLQ_TOPIC:-transactions.dlq} --partitions 1 --replication-factor 1
+      - >-
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic "$${KAFKA_TOPIC}" --partitions 3 --replication-factor 1;
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic "$${KAFKA_DLQ_TOPIC}" --partitions 1 --replication-factor 1
+    environment:
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-transactions}
+      KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-transactions.dlq}
     restart: "no"
+    networks: [fraud]
 
   migrate:
     <<: *app
-    depends_on: { postgres: { condition: service_healthy } }
-    command: python scripts/migrate.py
+    command: ["python", "scripts/migrate.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: "no"
 
-  # One-shot bootstrap: create sample data (if no PaySim file is mounted), run ETL, train, score.
+  # Explicit, read-only source data and existing model artifacts are bind-mounted above.
+  # This job only ETL-loads and scores; it does not generate datasets or retrain/overwrite models.
   bootstrap:
     <<: *app
-    depends_on: { migrate: { condition: service_completed_successfully } }
-    command: >
-      sh -c "[ -f $${PAYSIM_CSV} ] || python -m backend.src.data.generate_paysim --rows 100000 --out $${PAYSIM_CSV};
-             python -m backend.src.etl.batch_etl && python -m backend.src.ml.train && python -m backend.src.scoring.batch_score"
+    command:
+      - sh
+      - -ec
+      - >-
+        test -s "$${PAYSIM_CSV}" || { echo "Source CSV missing or empty: $${PAYSIM_CSV}" >&2; exit 2; };
+        test -s "$${MODEL_DIR}/fraud_bundle.joblib" || { echo "Model bundle missing; train or restore it explicitly before bootstrap" >&2; exit 2; };
+        python -m backend.src.etl.batch_etl --input "$${PAYSIM_CSV}";
+        python -m backend.src.scoring.batch_score
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
     restart: "no"
-    profiles: ["bootstrap"]
-
-  mlflow:
-    <<: *app
-    command: mlflow ui --backend-store-uri sqlite:////app/state/mlflow.db --host 0.0.0.0 --port 5000
-    ports: ["5000:5000"]
+    profiles: [bootstrap]
 
   api:
     <<: *app
-    command: python -m uvicorn backend.api.main:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000}
-    depends_on: { migrate: { condition: service_completed_successfully } }
-    ports: ["8000:8000"]
+    command: ["python", "-m", "uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${API_PUBLISHED_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      test:
+        - CMD-SHELL
+        - "curl -fsS http://localhost:8000/health | grep -q '\"status\":\"ok\"'"
       interval: 10s
-      retries: 10
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
 
   frontend:
-    build: { context: ., dockerfile: docker/Dockerfile.frontend }
-    depends_on: [api]
-    ports: ["3000:80"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${FRONTEND_PUBLISHED_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+    networks: [fraud]
+
+  mlflow:
+    <<: *app
+    command: ["mlflow", "ui", "--backend-store-uri", "sqlite:////app/state/mlflow.db", "--host", "0.0.0.0", "--port", "5000"]
+    ports:
+      - "127.0.0.1:${MLFLOW_PUBLISHED_PORT:-5000}:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    profiles: [mlflow]
 
   streamlit:
     <<: *app
-    command: streamlit run streamlit_app/app.py --server.port 8501 --server.address 0.0.0.0
-    depends_on: { migrate: { condition: service_completed_successfully } }
-    ports: ["8501:8501"]
+    command: ["streamlit", "run", "streamlit_app/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${STREAMLIT_PUBLISHED_PORT:-8501}:8501"
+    restart: unless-stopped
+    profiles: [streamlit]
 
   stream-consumer:
     <<: *app
-    command: python -m backend.src.streaming.consumer
+    command: ["python", "-m", "backend.src.streaming.consumer"]
     depends_on:
-      kafka-init: { condition: service_completed_successfully }
-      migrate: { condition: service_completed_successfully }
+      kafka-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
     restart: unless-stopped
-    profiles: ["streaming"]
-
-  spark-stream:
-    <<: *app
-    command: python -m backend.src.streaming.spark_stream --source kafka
-    depends_on:
-      kafka-init: { condition: service_completed_successfully }
-      migrate: { condition: service_completed_successfully }
-    restart: unless-stopped
-    profiles: ["spark"]   # use either stream-consumer OR spark-stream (same consumer group semantics differ)
+    profiles: [streaming]
 
   producer:
     <<: *app
-    command: python -m backend.src.streaming.producer --rate 50 --limit 5000 --dup-ratio 0.02
-    depends_on: { kafka-init: { condition: service_completed_successfully } }
+    command: ["python", "-m", "backend.src.streaming.producer", "--rate", "50", "--limit", "5000", "--dup-ratio", "0.02"]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     restart: "no"
-    profiles: ["streaming", "spark"]
+    profiles: [streaming]
+
+  spark-stream:
+    <<: *app
+    command: ["python", "-m", "backend.src.streaming.spark_stream", "--source", "kafka"]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: [spark]
+
+  dbt:
+    <<: *app
+    working_dir: /app/dbt_project
+    command: ["dbt", "build", "--project-dir", ".", "--profiles-dir", "."]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    profiles: [analytics]
 
   airflow:
-    build: { context: ., dockerfile: docker/Dockerfile.airflow }
-    env_file: .env
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.airflow
     environment:
-      POSTGRES_HOST: postgres
-      MLFLOW_TRACKING_URI: sqlite:////app/state/mlflow.db
-      PAYSIM_CSV: /app/data/raw/paysim.csv
-      MODEL_DIR: /app/models
+      <<: *app-environment
       AIRFLOW__CORE__LOAD_EXAMPLES: "False"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/orchestration/dags
-    command: standalone
-    depends_on: { migrate: { condition: service_completed_successfully } }
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW_HOME: /home/airflow/airflow
+      PROJECT_DIR: /opt/airflow/project
+      PYTHONPATH: /opt/airflow/project
+      PYTHON_BIN: /home/airflow/fraud-venv/bin/python
+      DBT_BIN: /home/airflow/dbt-venv/bin/dbt
+    command: ["standalone"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
     volumes:
-      - ./:/opt/airflow/project
-      - data:/app/data
-      - models:/app/models
-      - state:/app/state
-    ports: ["8080:8080"]
-    profiles: ["airflow"]
+      - type: bind
+        source: ./orchestration/dags
+        target: /opt/airflow/project/orchestration/dags
+        read_only: true
+      - type: bind
+        source: ./backend/api
+        target: /opt/airflow/project/backend/api
+        read_only: true
+      - type: bind
+        source: ./backend/src
+        target: /opt/airflow/project/backend/src
+        read_only: true
+      - type: bind
+        source: ./scripts
+        target: /opt/airflow/project/scripts
+        read_only: true
+      - type: bind
+        source: ./dbt_project
+        target: /opt/airflow/project/dbt_project
+        read_only: true
+      - type: bind
+        source: ./data/raw
+        target: /app/data/raw
+        read_only: true
+      - type: bind
+        source: ./data/stream_in
+        target: /app/data/stream_in
+      - type: bind
+        source: ./models
+        target: /app/models
+      - processed-data:/app/data/processed
+      - spark-checkpoints:/app/data/checkpoints
+      - app-state:/app/state
+      - airflow-data:/home/airflow/airflow
+      - airflow-dbt-target:/opt/airflow/project/dbt_project/target
+      - airflow-dbt-logs:/opt/airflow/project/dbt_project/logs
+    ports:
+      - "127.0.0.1:${AIRFLOW_PUBLISHED_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+    profiles: [airflow]
+    networks: [fraud]
 
-volumes: { pgdata: {}, data: {}, models: {}, state: {} }
+volumes:
+  pgdata:
+  kafka-data:
+  processed-data:
+  spark-checkpoints:
+  app-state:
+  airflow-data:
+  airflow-dbt-target:
+  airflow-dbt-logs:
+
+networks:
+  fraud:
+    name: fraud-platform
